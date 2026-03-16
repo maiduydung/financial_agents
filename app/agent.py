@@ -7,7 +7,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
-from app.tools import retrieve_docs, fetch_company_metrics, run_basic_financial_checks, generate_analysis
+from app.tools import retrieve_docs, fetch_company_metrics, run_basic_financial_checks, generate_analysis, web_enrich
 from config.settings import OPENAI_API_KEY, OPENAI_MODEL
 
 logger = logging.getLogger(__name__)
@@ -19,17 +19,19 @@ by using the tools available to you. Follow this workflow:
 1. First, retrieve relevant documents from the vector database using retrieve_docs
 2. Fetch live company metrics using fetch_company_metrics
 3. Run basic financial health checks using run_basic_financial_checks
-4. Synthesize all findings into a clear, explainable analysis
+4. If you need more context (recent news, SEC filings, analyst opinions), use web_enrich to browse the web and add data to the knowledge base
+5. Synthesize all findings into a clear, explainable analysis
 
 Always cite your sources (which documents/metrics you used). Be concise but thorough.
-If you can identify the company ticker from the question, use it to filter results."""
+If you can identify the company ticker from the question, use it to filter results.
+Use web_enrich when the user asks about very recent events or data not in our database."""
 
 
 class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
 
 
-tools = [retrieve_docs, fetch_company_metrics, run_basic_financial_checks, generate_analysis]
+tools = [retrieve_docs, fetch_company_metrics, run_basic_financial_checks, generate_analysis, web_enrich]
 
 
 def _get_llm():

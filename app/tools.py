@@ -1,6 +1,7 @@
 """Agent tools for the Financial Analyst Agent."""
 
 import logging
+import asyncio
 import httpx
 from langchain_core.tools import tool
 from app.retriever import retrieve_docs as _retrieve
@@ -126,3 +127,32 @@ def generate_analysis(context: str) -> str:
     """
     logger.info("🧪 Generating analysis (%d chars of context)", len(context))
     return f"Please synthesize the following financial data into a clear analysis:\n\n{context}"
+
+
+@tool
+def web_enrich(task: str, company: str) -> str:
+    """Browse the web to find additional financial information and store it in the knowledge base.
+
+    Use this when you need information that isn't available in the vector database or FMP API,
+    such as recent news, SEC filings, analyst opinions, or earnings call details.
+
+    Args:
+        task: What to search for, e.g. "Find latest AAPL earnings call highlights"
+        company: Company ticker symbol (e.g. AAPL).
+    """
+    from app.browser_agent import run_browser_agent
+
+    logger.info("🌐 Web enrichment requested: %s (company=%s)", task, company)
+    enriched_task = f"{task}. After extracting the information, store it for company {company}."
+
+    # Run the browser agent
+    loop = asyncio.get_event_loop()
+    if loop.is_running():
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            result = pool.submit(asyncio.run, run_browser_agent(enriched_task)).result()
+    else:
+        result = asyncio.run(run_browser_agent(enriched_task))
+
+    logger.info("🌐 Web enrichment complete for %s", company)
+    return result
