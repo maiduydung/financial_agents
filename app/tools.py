@@ -233,7 +233,7 @@ def web_research(query: str, company: str) -> str:
     """
     logger.info("🔬 Deep research: %s (company=%s)", query, company)
     client = _get_tavily_client()
-    response = client.research(query=query)
+    response = client.research(input=query)
 
     extracted = response.get("report", "") or response.get("answer", "") or str(response)
     logger.info("🔬 Research returned %d chars", len(extracted))
