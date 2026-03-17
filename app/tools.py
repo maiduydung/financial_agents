@@ -1,7 +1,6 @@
 """Agent tools for the Financial Analyst Agent."""
 
 import logging
-import asyncio
 import httpx
 from langchain_core.tools import tool
 from app.retriever import retrieve_docs as _retrieve
@@ -129,30 +128,114 @@ def generate_analysis(context: str) -> str:
     return f"Please synthesize the following financial data into a clear analysis:\n\n{context}"
 
 
-@tool
-def web_enrich(task: str, company: str) -> str:
-    """Browse the web to find additional financial information and store it in the knowledge base.
+def _get_tavily_client():
+    from tavily import TavilyClient
+    from config.settings import TAVILY_API_KEY
+    if not TAVILY_API_KEY:
+        raise ValueError("TAVILY_API_KEY not set")
+    return TavilyClient(api_key=TAVILY_API_KEY)
 
-    Use this when you need information that isn't available in the vector database or FMP API,
-    such as recent news, SEC filings, analyst opinions, or earnings call details.
+
+def _ingest_text(text: str, company: str, source_type: str = "web") -> int:
+    """Send extracted text to the ingestor service. Returns chunks stored."""
+    from config.settings import INGESTOR_BASE_URL
+    if not text or len(text) < 20:
+        return 0
+    resp = httpx.post(
+        f"{INGESTOR_BASE_URL}/api/ingestLLMData",
+        json={"text": text, "company": company.upper(), "source_type": source_type},
+        timeout=30,
+    )
+    if resp.status_code == 200:
+        return resp.json().get("chunks_stored", 0)
+    logger.warning("⚠️ Ingestor returned %d: %s", resp.status_code, resp.text)
+    return 0
+
+
+@tool
+def web_search(query: str, company: str) -> str:
+    """Search the web for financial information using Tavily. Fast and cheap.
+
+    Use this as the PRIMARY way to find information not in the vector database:
+    recent news, earnings, analyst opinions, company info, SEC filings, etc.
 
     Args:
-        task: What to search for, e.g. "Find latest AAPL earnings call highlights"
-        company: Company ticker symbol (e.g. AAPL).
+        query: Search query, e.g. "AAPL Q4 2025 earnings results"
+        company: Company ticker or name for metadata (e.g. AAPL).
     """
-    from app.browser_agent import run_browser_agent
+    logger.info("🔍 Web search: %s (company=%s)", query, company)
+    client = _get_tavily_client()
+    response = client.search(query=query, max_results=5, include_answer=True)
 
-    logger.info("🌐 Web enrichment requested: %s (company=%s)", task, company)
-    enriched_task = f"{task}. After extracting the information, store it for company {company}."
+    parts = []
+    if response.get("answer"):
+        parts.append(f"Summary: {response['answer']}")
+    for r in response.get("results", []):
+        parts.append(f"[{r.get('title', '')}]({r.get('url', '')})\n{r.get('content', '')}")
 
-    # Run the browser agent
-    loop = asyncio.get_event_loop()
-    if loop.is_running():
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor() as pool:
-            result = pool.submit(asyncio.run, run_browser_agent(enriched_task)).result()
-    else:
-        result = asyncio.run(run_browser_agent(enriched_task))
+    extracted = "\n\n---\n\n".join(parts)
+    logger.info("🔍 Tavily returned %d results (%d chars)", len(response.get("results", [])), len(extracted))
 
-    logger.info("🌐 Web enrichment complete for %s", company)
-    return result
+    if not extracted or len(extracted) < 20:
+        return f"No web results found for '{query}'."
+
+    n_chunks = _ingest_text(extracted, company)
+    logger.info("✅ Web search done — %d chunks stored for %s", n_chunks, company)
+    return extracted
+
+
+@tool
+def web_extract(url: str, company: str) -> str:
+    """Extract and read the full content of a specific URL using Tavily.
+
+    Use this when you have a specific URL (article, SEC filing, company page, Wikipedia, etc.)
+    and want to read its full content. Much better than just a search snippet.
+
+    Args:
+        url: The URL to extract content from, e.g. "https://en.wikipedia.org/wiki/Apple_Inc."
+        company: Company ticker or name for metadata (e.g. AAPL).
+    """
+    logger.info("📄 Extracting URL: %s (company=%s)", url, company)
+    client = _get_tavily_client()
+    response = client.extract(url)
+
+    parts = []
+    for r in response.get("results", []):
+        parts.append(r.get("raw_content", "") or r.get("content", ""))
+
+    extracted = "\n\n".join(parts)
+    logger.info("📄 Extracted %d chars from %s", len(extracted), url)
+
+    if not extracted or len(extracted) < 20:
+        return f"Could not extract content from {url}."
+
+    n_chunks = _ingest_text(extracted, company)
+    logger.info("✅ URL extraction done — %d chunks stored for %s", n_chunks, company)
+    return extracted[:3000] + ("..." if len(extracted) > 3000 else "")
+
+
+@tool
+def web_research(query: str, company: str) -> str:
+    """Deep web research on a topic using Tavily. Use for complex questions that need
+    multiple sources synthesized together (e.g. "What are the risks facing NVDA in 2026?").
+
+    This is slower and more expensive than web_search — only use when a simple search
+    isn't enough and you need a thorough, multi-source answer.
+
+    Args:
+        query: Research question, e.g. "What are analysts saying about MSFT cloud growth?"
+        company: Company ticker or name for metadata (e.g. MSFT).
+    """
+    logger.info("🔬 Deep research: %s (company=%s)", query, company)
+    client = _get_tavily_client()
+    response = client.research(query=query)
+
+    extracted = response.get("report", "") or response.get("answer", "") or str(response)
+    logger.info("🔬 Research returned %d chars", len(extracted))
+
+    if not extracted or len(extracted) < 20:
+        return f"No research results for '{query}'."
+
+    n_chunks = _ingest_text(extracted, company)
+    logger.info("✅ Deep research done — %d chunks stored for %s", n_chunks, company)
+    return extracted[:5000] + ("..." if len(extracted) > 5000 else "")

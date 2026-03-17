@@ -3,11 +3,11 @@
 import logging
 from typing import Annotated, TypedDict
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
-from app.tools import retrieve_docs, fetch_company_metrics, run_basic_financial_checks, generate_analysis, web_enrich
+from app.tools import retrieve_docs, fetch_company_metrics, run_basic_financial_checks, generate_analysis, web_search, web_extract, web_research
 from config.settings import OPENAI_API_KEY, OPENAI_MODEL
 
 logger = logging.getLogger(__name__)
@@ -17,21 +17,29 @@ SYSTEM_PROMPT = """You are a Financial Analyst Agent. Your job is to answer ques
 by using the tools available to you. Follow this workflow:
 
 1. First, retrieve relevant documents from the vector database using retrieve_docs
-2. Fetch live company metrics using fetch_company_metrics
-3. Run basic financial health checks using run_basic_financial_checks
-4. If you need more context (recent news, SEC filings, analyst opinions), use web_enrich to browse the web and add data to the knowledge base
-5. Synthesize all findings into a clear, explainable analysis
+2. For public companies: fetch live metrics (fetch_company_metrics) and health checks (run_basic_financial_checks)
+3. Use web tools to supplement — they are fast and cheap, so use them freely:
+   - web_search: Quick search for news, earnings, company info. Use this often.
+   - web_extract: Read the full content of a specific URL (article, SEC filing, wiki page, etc.)
+   - web_research: Deep multi-source research for complex questions. Slower — use when a simple search isn't enough.
+4. Synthesize all findings into a clear, explainable analysis
+
+GUIDELINES:
+- Steps 2 only works for publicly traded companies with ticker symbols. Private companies will fail — that's expected.
+- web_search is cheap and fast — prefer it whenever you need info beyond what's in the vector DB.
+- If web_search returns a promising URL, use web_extract to read the full page.
+- Use web_research only for complex, multi-faceted questions that need deep analysis.
+- All web results are automatically stored in the knowledge base for future queries.
 
 Always cite your sources (which documents/metrics you used). Be concise but thorough.
-If you can identify the company ticker from the question, use it to filter results.
-Use web_enrich when the user asks about very recent events or data not in our database."""
+If you can identify the company ticker from the question, use it to filter results."""
 
 
 class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
 
 
-tools = [retrieve_docs, fetch_company_metrics, run_basic_financial_checks, generate_analysis, web_enrich]
+tools = [retrieve_docs, fetch_company_metrics, run_basic_financial_checks, generate_analysis, web_search, web_extract, web_research]
 
 
 def _get_llm():
@@ -82,10 +90,17 @@ def build_graph():
 agent = build_graph()
 
 
-async def run_agent(question: str) -> str:
+async def run_agent(question: str, history: list[tuple[str, str]] | None = None) -> str:
     """Run the agent with a user question and return the final answer."""
     logger.info("🏁 Starting agent for question: %s", question)
-    initial_state = {"messages": [HumanMessage(content=question)]}
+    messages = []
+    for role, content in (history or []):
+        if role == "user":
+            messages.append(HumanMessage(content=content))
+        else:
+            messages.append(AIMessage(content=content))
+    messages.append(HumanMessage(content=question))
+    initial_state = {"messages": messages}
     result = await agent.ainvoke(initial_state)
     logger.info("🏁 Agent finished — %d messages in chain", len(result["messages"]))
     return result["messages"][-1].content
