@@ -141,14 +141,19 @@ def _ingest_text(text: str, company: str, source_type: str = "web") -> int:
     from config.settings import INGESTOR_BASE_URL
     if not text or len(text) < 20:
         return 0
-    resp = httpx.post(
-        f"{INGESTOR_BASE_URL}/api/ingestLLMData",
-        json={"text": text, "company": company.upper(), "source_type": source_type},
-        timeout=30,
-    )
-    if resp.status_code == 200:
-        return resp.json().get("chunks_stored", 0)
-    logger.warning("⚠️ Ingestor returned %d: %s", resp.status_code, resp.text)
+    try:
+        resp = httpx.post(
+            f"{INGESTOR_BASE_URL}/api/ingestLLMData",
+            json={"text": text, "company": company.upper(), "source_type": source_type},
+            timeout=30,
+        )
+        if resp.status_code == 200:
+            return resp.json().get("chunks_stored", 0)
+        logger.warning("⚠️ Ingestor returned %d: %s", resp.status_code, resp.text)
+    except httpx.ConnectError:
+        logger.warning("⚠️ Ingestor unavailable at %s — skipping storage", INGESTOR_BASE_URL)
+    except Exception as e:
+        logger.warning("⚠️ Ingestor call failed: %s", e)
     return 0
 
 
