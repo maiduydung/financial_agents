@@ -7,8 +7,8 @@ import httpx
 API_URL = "http://localhost:8000"
 
 st.set_page_config(page_title="Financial Analyst Agent", page_icon="📊", layout="wide")
-st.title("📊 Financial Analyst Agent")
-st.caption("Ask anything about AAPL, MSFT, NVDA — the agent decides what tools to use (RAG, live data, web browsing)")
+st.title("📊 Company Analyst Agent")
+st.caption("Ask anything about any companies — the agent decides what tools to use (RAG, live data, web browsing)")
 
 # Initialize chat history
 if "messages" not in st.session_state:
@@ -18,11 +18,9 @@ if "messages" not in st.session_state:
 with st.sidebar:
     st.markdown("### 💡 Try asking")
     examples = [
-        "Give me a quick financial health summary for Apple.",
-        "Why might Nvidia's margins be changing?",
+        "Give me a quick overview on the company Aitomatic",
         "Are there any financial risk signals for Microsoft?",
-        "Find the latest earnings call highlights for NVDA and analyze them.",
-        "What do analysts think about AAPL's stock price target?",
+        "Use web search and tell me about the Pathfinder Softworks company",
     ]
     for ex in examples:
         if st.button(ex, key=ex, use_container_width=True):

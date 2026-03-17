@@ -1,73 +1,77 @@
-# Financial Analyst Agent
+# Company Analyst Agent
 
-LangGraph-based agent that answers financial questions about companies using RAG, live API data, and on-demand web browsing.
+LangGraph-based agent that answers questions about companies using RAG, live API data, and web search (Tavily). Features a Streamlit chat UI with real-time agent activity logs.
 
 ## Architecture
 
 ```mermaid
 flowchart TD
-    subgraph ui["🖥️ Streamlit UI"]
-        U1["🤖 Ask Agent tab"]
-        U2["🌐 Web Enrichment tab"]
+    subgraph ui["Streamlit Chat UI"]
+        Chat["Chat Interface"]
+        Logs["Live Agent Logs (SSE)"]
     end
 
-    subgraph api["⚡ FastAPI Server"]
+    subgraph api["FastAPI Server"]
         A1["POST /query"]
-        A2["POST /enrich"]
+        A2["POST /query/stream (SSE)"]
+        A3["POST /enrich"]
     end
 
-    subgraph analyst["🤖 Financial Analyst Agent (LangGraph)"]
+    subgraph agent["LangGraph Analyst Agent"]
         direction TB
-        S1[System Prompt] --> LLM1["GPT-4o-mini"]
-        LLM1 -->|tool_calls?| D1{Has tool calls?}
-        D1 -->|Yes| T1[Tools]
-        D1 -->|No| Ans1["💬 Final Answer"]
-        T1 --> LLM1
+        SP[System Prompt] --> LLM["GPT-4o-mini"]
+        LLM -->|tool calls?| Decision{Has tool calls?}
+        Decision -->|Yes| Tools["ToolNode"]
+        Decision -->|No| Answer["Final Answer"]
+        Tools --> LLM
     end
 
-    subgraph browser["🌐 Browser Agent (LangGraph)"]
-        direction TB
-        S2[System Prompt] --> LLM2["GPT-4o-mini"]
-        LLM2 -->|tool_calls?| D2{Has tool calls?}
-        D2 -->|Yes| T2[Tools]
-        D2 -->|No| Ans2["💬 Summary"]
-        T2 --> LLM2
+    subgraph tools["Agent Tools"]
+        T1["retrieve_docs\nVector DB search"]
+        T2["fetch_company_metrics\nLive financial ratios"]
+        T3["run_basic_financial_checks\nRevenue, debt, margins"]
+        T4["generate_analysis\nSynthesize findings"]
+        T5["web_search\nTavily quick search"]
+        T6["web_extract\nRead full URL content"]
+        T7["web_research\nDeep multi-source research"]
     end
 
-    subgraph analyst_tools["🔧 Analyst Tools"]
-        AT1["📚 retrieve_docs"]
-        AT2["📊 fetch_company_metrics"]
-        AT3["🏥 run_basic_financial_checks"]
-        AT4["🧪 generate_analysis"]
-        AT5["🌐 web_enrich → triggers Browser Agent"]
+    subgraph ingestor["Azure Functions Ingestor"]
+        I1["POST /api/ingest/{symbol}\nFMP data pipeline"]
+        I2["POST /api/ingestLLMData\nAgent web data pipeline"]
+        Chunk["Chunk (500 chars)"]
+        Embed["OpenAI Embeddings"]
     end
 
-    subgraph browser_tools["🔧 Browser Tools"]
-        BT1["🌐 browse_and_extract\n(Playwright + browser-use)"]
-        BT2["💾 store_enrichment\n→ chunk → embed → Chroma"]
+    subgraph external["External Services"]
+        Chroma["Chroma Cloud"]
+        FMP["FMP API"]
+        OAI["OpenAI API"]
+        Tavily["Tavily API"]
     end
 
-    subgraph external["🌐 External Services"]
-        Chroma["🧠 Chroma Cloud"]
-        FMP["📡 FMP API"]
-        OAI["OpenAI"]
-        Web["🌍 The Internet\n(via headless Chrome)"]
-    end
+    Chat --> A2
+    A2 -->|logs + answer| Logs
+    A1 --> agent
+    A2 --> agent
 
-    U1 --> A1 --> analyst
-    U2 --> A2 --> browser
-    AT5 -.->|on demand| browser
+    Tools --> T1 & T2 & T3 & T4 & T5 & T6 & T7
 
-    AT1 --> Chroma
-    AT2 & AT3 --> FMP
-    BT1 --> Web
-    BT2 --> Chroma
-    LLM1 & LLM2 --> OAI
+    T1 --> Chroma
+    T2 & T3 --> FMP
+    T5 & T6 & T7 --> Tavily
+    T5 & T6 & T7 -->|store results| I2
+
+    I1 --> Chunk --> Embed --> Chroma
+    I2 --> Chunk
+
+    LLM --> OAI
 
     style ui fill:#ff4b4b,color:#fff
     style api fill:#009688,color:#fff
-    style analyst fill:#1a1a2e,color:#fff
-    style browser fill:#1a1a2e,color:#fff
+    style agent fill:#1a1a2e,color:#fff
+    style tools fill:#2d2d44,color:#fff
+    style ingestor fill:#0d47a1,color:#fff
     style external fill:#374151,color:#fff
 ```
 
@@ -76,53 +80,79 @@ flowchart TD
 ```mermaid
 sequenceDiagram
     participant User
+    participant Streamlit
     participant FastAPI
-    participant Analyst as Analyst Agent
-    participant Browser as Browser Agent
-    participant Chrome as Headless Chrome
+    participant Agent as Analyst Agent
+    participant Tavily
+    participant Ingestor as Azure Functions Ingestor
     participant Chroma as Chroma Cloud
     participant FMP as FMP API
 
-    User->>FastAPI: "Financial health summary for Apple"
-    FastAPI->>Analyst: run_agent(question)
+    User->>Streamlit: "Tell me about Apple"
+    Streamlit->>FastAPI: POST /query/stream (+ chat history)
+    FastAPI->>Agent: run_agent(question, history)
+    FastAPI-->>Streamlit: SSE: log events (real-time)
 
-    Analyst->>Analyst: retrieve_docs → Chroma
-    Analyst->>Analyst: fetch_company_metrics → FMP
-    Analyst->>Analyst: run_basic_financial_checks → FMP
+    Agent->>Chroma: retrieve_docs("Apple")
+    Chroma-->>Agent: Relevant documents
 
-    alt Needs more context
-        Analyst->>Browser: web_enrich("Find recent AAPL news", "AAPL")
-        Browser->>Chrome: Navigate, search, extract
-        Chrome-->>Browser: Extracted text
-        Browser->>Chroma: store_enrichment (chunk → embed → store)
-        Browser-->>Analyst: Enrichment summary
+    Agent->>FMP: fetch_company_metrics("AAPL")
+    FMP-->>Agent: Financial ratios
+
+    Agent->>FMP: run_basic_financial_checks("AAPL")
+    FMP-->>Agent: Health flags
+
+    opt Needs more context
+        Agent->>Tavily: web_search("AAPL latest news")
+        Tavily-->>Agent: Search results
+        Agent->>Ingestor: POST /api/ingestLLMData
+        Ingestor->>Chroma: Chunk + embed + store
     end
 
-    Analyst-->>FastAPI: Final analysis
-    FastAPI-->>User: Structured answer with citations
+    opt Has a specific URL to read
+        Agent->>Tavily: web_extract("https://...")
+        Tavily-->>Agent: Full page content
+        Agent->>Ingestor: POST /api/ingestLLMData
+        Ingestor->>Chroma: Chunk + embed + store
+    end
+
+    Agent-->>FastAPI: Final analysis
+    FastAPI-->>Streamlit: SSE: answer event
+    Streamlit-->>User: Rendered answer + collapsed logs
 ```
 
 ### Data Enrichment Flow
 
 ```mermaid
 flowchart LR
-    A["🌐 Browser Agent"] -->|extracts text| B["📄 Raw Content"]
-    B --> C["✂️ Chunk (500 chars)"]
-    C --> D["🧠 OpenAI Embeddings"]
-    D --> E["💾 Chroma Cloud"]
-    E -->|available to| F["📚 retrieve_docs"]
-    F -->|used by| G["🤖 Analyst Agent"]
+    A["Tavily API"] -->|search / extract / research| B["Raw Content"]
+    B -->|POST /api/ingestLLMData| C["Azure Functions Ingestor"]
+    C --> D["Chunk (500 chars)"]
+    D --> E["OpenAI Embeddings"]
+    E --> F["Chroma Cloud"]
+    F -->|future queries| G["retrieve_docs"]
+    G -->|used by| H["Analyst Agent"]
 ```
 
 ## Setup
 
-1. Copy `.env.example` to `.env` and fill in your keys
+1. Copy `.env.example` to `.env` and fill in your keys:
+   ```
+   OPENAI_API_KEY=...
+   CHROMA_API_KEY=...
+   CHROMA_TENANT=...
+   CHROMA_DATABASE=...
+   FMP_API_KEY=...
+   TAVILY_API_KEY=...
+   ```
 2. Install dependencies:
    ```bash
    pip install -r requirements.txt
-   playwright install chromium
    ```
-3. Make sure you've run the ingestion pipeline (see `financial_data` repo) first
+3. Start the Azure Functions ingestor (see `financial_data` repo):
+   ```bash
+   cd ../financial_data && func start
+   ```
 
 ## Run
 
@@ -140,13 +170,19 @@ streamlit run ui/streamlit_app.py
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/query` | POST | Ask the analyst agent a financial question |
-| `/enrich` | POST | Use browser agent to research and enrich the knowledge base |
+| `/query` | POST | Ask the analyst agent a question |
+| `/query/stream` | POST | SSE stream — logs + final answer |
+| `/enrich` | POST | Standalone web enrichment |
 | `/health` | GET | Health check |
 
-## Example Questions
+## Agent Tools
 
-- "Give me a quick financial health summary for Apple."
-- "Why might Nvidia's margins be changing?"
-- "Are there any financial risk signals for Microsoft?"
-- "Find the latest earnings call highlights for NVDA and analyze them."
+| Tool | Description | Data Source |
+|------|-------------|-------------|
+| `retrieve_docs` | Search the vector database | Chroma Cloud |
+| `fetch_company_metrics` | Live financial ratios (public companies) | FMP API |
+| `run_basic_financial_checks` | Revenue, debt, margin checks | FMP API |
+| `generate_analysis` | Synthesize findings into analysis | LLM |
+| `web_search` | Quick web search | Tavily |
+| `web_extract` | Read full content of a URL | Tavily |
+| `web_research` | Deep multi-source research | Tavily |
