@@ -67,12 +67,12 @@ flowchart TD
 
     LLM --> OAI
 
-    style ui fill:#ff4b4b,color:#fff
-    style api fill:#009688,color:#fff
-    style agent fill:#1a1a2e,color:#fff
-    style tools fill:#2d2d44,color:#fff
-    style ingestor fill:#0d47a1,color:#fff
-    style external fill:#374151,color:#fff
+    style ui fill:#fce4ec,stroke:#e91e63,color:#333
+    style api fill:#e0f2f1,stroke:#009688,color:#333
+    style agent fill:#e8eaf6,stroke:#3f51b5,color:#333
+    style tools fill:#f3e5f5,stroke:#9c27b0,color:#333
+    style ingestor fill:#e3f2fd,stroke:#1565c0,color:#333
+    style external fill:#f5f5f5,stroke:#757575,color:#333
 ```
 
 ### Agent Workflow
